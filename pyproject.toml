@@ -1,14 +1,17 @@
 [project]
 name = "geez-amharic-translator"
 version = "0.1.0"
-description = "Add your description here"
+description = "English→French and Ge'ez→Amharic neural MT"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-dependencies = [
+# Streamlit Cloud installs from requirements.txt only (see README).
+# Notebook / local dev extras:
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
     "matplotlib>=3.10.9",
     "pdfplumber>=0.11.8",
-    "streamlit>=1.37.0",
-    "pandas>=2.2.2",
-    "numpy>=1.26.4",
-    "tensorflow==2.19.0",
+    "sacrebleu>=2.4.0",
+    "jupyter>=1.0.0",
 ]

@@ -60,8 +60,11 @@ The app loads `en_fr_artifacts/` by default. Use the sidebar to change the artif
 | Log message | Fix |
 |-------------|-----|
 | `No matching distribution found for tensorflow` | Set Python to **3.10** or **3.11** in Advanced settings, then redeploy. |
-| `tensorflow-macos` / `tensorflow-metal` | Those are Mac-only — Streamlit Cloud uses `requirements.txt` with `tensorflow==2.19.0` (Linux). |
+| `tensorflow-macos` can't be installed | Push latest `main` — **`uv.lock` must not be in the repo** (it pins Mac-only packages). Cloud uses `requirements.txt` only. |
+| `geez-amharic-translator==0.1.0 depends on numpy` + download error | Transient network error — click **Reboot app** in Manage app. |
 | Install succeeds but app crashes on load | Upload model artifacts via the sidebar (weights are not in the repo). |
+
+**Do not commit `uv.lock`** for this project. Streamlit Cloud uses `uv` and will try to install Mac-only packages from an old lock file.
 
 First deploy can take **5–10 minutes** while TensorFlow installs (~400 MB).
 
