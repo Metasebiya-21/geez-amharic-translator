@@ -1,5 +1,5 @@
+# Streamlit Cloud: set Python to 3.10 or 3.11 in Advanced settings (TensorFlow has no 3.13+ wheels).
 streamlit==1.37.0
-tensorflow>=2.16.0
+tensorflow==2.19.0
 pandas==2.2.2
 numpy==1.26.4
-sacrebleu

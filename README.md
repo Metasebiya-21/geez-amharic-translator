@@ -49,9 +49,21 @@ The app loads `en_fr_artifacts/` by default. Use the sidebar to change the artif
 
 ## Deploy with Streamlit Cloud
 
-1. Push **code only** to GitHub (`main.py`, `inference.py`, `requirements.txt`, notebooks, report, etc.).
+1. Push **code only** to GitHub (`main.py`, `inference.py`, `requirements.txt`, `packages.txt`, notebooks, report, etc.).
 2. Do **not** add model weights to the repo — they are listed in `.gitignore`.
 3. Connect the repo at [share.streamlit.io](https://share.streamlit.io) and set **Main file path** to `main.py`.
+4. **Important — Python version:** open **Advanced settings** and set **Python version to 3.10 or 3.11**. Streamlit defaults to 3.12+, and TensorFlow has no wheels for Python 3.13+, which causes `Error installing requirements` / `No matching distribution found for tensorflow`.
+5. Click **Save**, then redeploy (or delete and recreate the app if the error persists).
+
+### Troubleshooting “Error installing requirements”
+
+| Log message | Fix |
+|-------------|-----|
+| `No matching distribution found for tensorflow` | Set Python to **3.10** or **3.11** in Advanced settings, then redeploy. |
+| `tensorflow-macos` / `tensorflow-metal` | Those are Mac-only — Streamlit Cloud uses `requirements.txt` with `tensorflow==2.19.0` (Linux). |
+| Install succeeds but app crashes on load | Upload model artifacts via the sidebar (weights are not in the repo). |
+
+First deploy can take **5–10 minutes** while TensorFlow installs (~400 MB).
 
 ### Providing model files on Streamlit Cloud
 

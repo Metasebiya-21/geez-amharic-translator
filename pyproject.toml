@@ -7,6 +7,18 @@ requires-python = ">=3.10"
 dependencies = [
     "matplotlib>=3.10.9",
     "pdfplumber>=0.11.8",
+    "streamlit>=1.37.0",
+    "pandas>=2.2.2",
+    "numpy>=1.26.4",
+]
+
+[project.optional-dependencies]
+# Local Apple Silicon training (not used on Streamlit Cloud — see requirements.txt)
+mac = [
     "tensorflow-macos>=2.16.2",
     "tensorflow-metal>=1.2.0",
+]
+# Linux / Streamlit Cloud / Colab
+cpu = [
+    "tensorflow==2.19.0",
 ]
