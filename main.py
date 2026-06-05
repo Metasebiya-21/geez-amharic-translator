@@ -1,144 +1,137 @@
+"""Streamlit app: English → French translation using trained artifacts."""
 
-import os, json, pickle, tempfile, time
-import numpy as np
+from __future__ import annotations
+
+import json
+import pickle
+import tempfile
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
-import tensorflow as tf
-from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-st.set_page_config(page_title="BLSTM Translator", page_icon="🌐", layout="centered")
+from inference import load_artifacts, translate
 
-st.title("BLSTM Translator (Seq2Seq + Attention)")
+ROOT = Path(__file__).resolve().parent
+DEFAULT_ARTIFACTS = ROOT / "en_fr_artifacts"
 
-st.markdown(
-    "Load your trained artifacts (`best_model.keras`, `src_tokenizer.pkl`, "
-    "`tgt_tokenizer.pkl`, `meta.json`) and translate Amharic/Ge'ez/English sentences."
-)
+st.set_page_config(page_title="EN → FR Translator", page_icon="🇫🇷", layout="centered")
 
-# ---------- Sidebar: load artifacts ----------
+st.title("English → French Translator")
+st.caption("BiLSTM seq2seq + attention · beam search decoding")
+
+
+@st.cache_resource(show_spinner="Loading model…")
+def _load_cached(artifacts_dir: str):
+    return load_artifacts(artifacts_dir)
+
+
+def _try_load_directory(path: Path) -> dict | None:
+    try:
+        return _load_cached(str(path.resolve()))
+    except Exception as exc:
+        st.sidebar.error(f"Failed to load: {exc}")
+        return None
+
+
 with st.sidebar:
-    st.header("Artifacts")
-    artifacts_dir = st.text_input("Artifacts directory", value="artifacts")
-    use_uploads = st.checkbox("Upload artifacts instead of directory", value=False)
+    st.header("Model artifacts")
+    artifacts_dir = st.text_input(
+        "Artifacts folder",
+        value=str(DEFAULT_ARTIFACTS),
+        help="Folder containing best_model.keras, tokenizers, and meta.json",
+    )
+    use_upload = st.checkbox("Upload artifacts instead", value=False)
 
-    model_path = None
-    src_tok = None
-    tgt_tok = None
-    meta = None
+    bundle = None
 
-    if not use_uploads:
-        if st.button("Load from directory"):
-            try:
-                model_path = os.path.join(artifacts_dir, "best_model.keras")
-                with open(os.path.join(artifacts_dir, "src_tokenizer.pkl"), "rb") as f:
-                    src_tok = pickle.load(f)
-                with open(os.path.join(artifacts_dir, "tgt_tokenizer.pkl"), "rb") as f:
-                    tgt_tok = pickle.load(f)
-                with open(os.path.join(artifacts_dir, "meta.json"), "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                st.success("Loaded artifacts from directory.")
-            except Exception as e:
-                st.error(f"Failed to load artifacts: {e}")
-    else:
-        up_model = st.file_uploader("best_model.keras", type=["keras", "h5"])
+    if use_upload:
+        up_model = st.file_uploader("best_model.keras", type=["keras"])
         up_src = st.file_uploader("src_tokenizer.pkl", type=["pkl"])
         up_tgt = st.file_uploader("tgt_tokenizer.pkl", type=["pkl"])
         up_meta = st.file_uploader("meta.json", type=["json"])
-        if st.button("Load uploaded artifacts"):
-            try:
-                tmpdir = tempfile.mkdtemp()
-                model_path = os.path.join(tmpdir, "best_model.keras")
-                with open(model_path, "wb") as f:
-                    f.write(up_model.read())
-                src_tok = pickle.load(up_src)
-                tgt_tok = pickle.load(up_tgt)
-                meta = json.load(up_meta)
-                st.success("Loaded uploaded artifacts.")
-            except Exception as e:
-                st.error(f"Failed to load uploaded artifacts: {e}")
+        if st.button("Load uploaded files") and all([up_model, up_src, up_tgt, up_meta]):
+            tmp = Path(tempfile.mkdtemp(prefix="en_fr_"))
+            (tmp / "best_model.keras").write_bytes(up_model.getvalue())
+            (tmp / "src_tokenizer.pkl").write_bytes(up_src.getvalue())
+            (tmp / "tgt_tokenizer.pkl").write_bytes(up_tgt.getvalue())
+            (tmp / "meta.json").write_text(up_meta.getvalue().decode("utf-8"), encoding="utf-8")
+            bundle = _try_load_directory(tmp)
+    else:
+        path = Path(artifacts_dir).expanduser()
+        if not path.is_absolute():
+            path = (ROOT / path).resolve()
+        if path.is_dir():
+            bundle = _try_load_directory(path)
+        else:
+            st.warning(f"Folder not found: {path}")
 
-# Cache model loading
-@st.cache_resource(show_spinner=True)
-def load_model_cached(path):
-    return tf.keras.models.load_model(path, compile=False)
+    decode_method = "beam"
+    if bundle:
+        meta = bundle["meta"]
+        st.success("Model loaded")
+        st.write(f"**Path:** `{bundle['artifacts_dir']}`")
+        st.write(f"**Max lengths:** src={meta['max_src_len']}, tgt={meta['max_tgt_len']}")
+        decode_method = st.selectbox(
+            "Decode method",
+            options=["beam", "greedy"],
+            index=0 if meta.get("decode_method", "beam") == "beam" else 1,
+        )
 
-def ensure_artifacts_loaded():
-    if not model_path or not src_tok or not tgt_tok or not meta:
-        st.stop()
-
-# ---------- Greedy decoding using the full model ----------
-def greedy_translate(model, src_text, src_tok, tgt_tok, max_src_len, max_tgt_len):
-    # Prepare tokens
-    start_id = tgt_tok.word_index.get("<s>")
-    end_id = tgt_tok.word_index.get("</s>")
-    if start_id is None or end_id is None:
-        return "[Error: target tokenizer must contain <s> and </s>]"
-
-    src_seq = src_tok.texts_to_sequences([str(src_text).strip()])[0]
-    if not src_seq:
-        return ""
-
-    src_seq = pad_sequences([src_seq], maxlen=max_src_len, padding="post")
-    tgt_seq = np.zeros((1, max_tgt_len), dtype="int32")
-    tgt_seq[0, 0] = start_id
-
-    out_tokens = []
-    for t in range(1, max_tgt_len):
-        # Predict full sequence probs and read the current step
-        probs = model.predict([src_seq, tgt_seq], verbose=0)
-        next_id = int(np.argmax(probs[0, t-1]))
-        if next_id == end_id:
-            break
-        out_tokens.append(next_id)
-        tgt_seq[0, t] = next_id
-
-    index2word = {i: w for w, i in tgt_tok.word_index.items()}
-    index2word[0] = "<pad>"
-    words = [index2word.get(i, "<unk>") for i in out_tokens]
-    # collapse space before punctuation (basic)
-    detok = " ".join(words).replace(" ,", ",").replace(" .", ".").replace(" !", "!").replace(" ?", "?").strip()
-    return detok
-
-# ---------- Main UI ----------
-tab1, tab2 = st.tabs(["🔤 Single Sentence", "📄 Batch Translate (TXT→CSV)"])
+tab1, tab2 = st.tabs(["Single sentence", "Batch (TXT → CSV)"])
 
 with tab1:
-    st.subheader("Single Sentence")
-    direction = st.text_input("Direction (for reference only)", value="amh → eng")
-    src_text = st.text_area("Source text", height=120, placeholder="Type a sentence in the source language...")
+    st.subheader("Translate English to French")
+    examples = [
+        "I wish Tom was here.",
+        "How did the audition go?",
+        "Take a seat.",
+    ]
+    example = st.selectbox("Try an example", [""] + examples)
+    src_text = st.text_area(
+        "English text",
+        value=example,
+        height=120,
+        placeholder="Enter an English sentence…",
+    )
 
-    if st.button("Translate"):
-        ensure_artifacts_loaded()
-        model = load_model_cached(model_path)
-        max_src_len = int(meta["max_src_len"])
-        max_tgt_len = int(meta["max_tgt_len"])
-        with st.spinner("Translating..."):
-            pred = greedy_translate(model, src_text, src_tok, tgt_tok, max_src_len, max_tgt_len)
-        st.success("Done")
-        st.markdown("**Prediction:**")
-        st.write(pred)
+    if st.button("Translate", type="primary"):
+        if bundle is None:
+            st.error("Load model artifacts in the sidebar first.")
+        elif not src_text.strip():
+            st.warning("Enter some English text.")
+        else:
+            with st.spinner("Translating…"):
+                pred = translate(bundle, src_text, decode=decode_method)
+            st.markdown("**French translation:**")
+            st.info(pred)
 
 with tab2:
-    st.subheader("Batch Translate")
-    st.markdown("Upload a `.txt` file with **one source sentence per line**.")
-    txt = st.file_uploader("Upload TXT", type=["txt"], key="txtu")
+    st.subheader("Batch translate")
+    st.markdown("Upload a `.txt` file with **one English sentence per line**.")
+    txt_file = st.file_uploader("Upload TXT", type=["txt"], key="batch_txt")
+
     if st.button("Run batch translate"):
-        ensure_artifacts_loaded()
-        model = load_model_cached(model_path)
-        max_src_len = int(meta["max_src_len"])
-        max_tgt_len = int(meta["max_tgt_len"])
-        if not txt:
-            st.warning("Please upload a TXT file first.")
+        if bundle is None:
+            st.error("Load model artifacts in the sidebar first.")
+        elif txt_file is None:
+            st.warning("Upload a TXT file first.")
         else:
-            lines = [ln.strip() for ln in txt.read().decode("utf-8").splitlines() if ln.strip()]
+            lines = [
+                ln.strip()
+                for ln in txt_file.read().decode("utf-8").splitlines()
+                if ln.strip()
+            ]
             preds = []
             prog = st.progress(0.0)
             for i, line in enumerate(lines):
-                preds.append(greedy_translate(model, line, src_tok, tgt_tok, max_src_len, max_tgt_len))
-                if (i+1) % 5 == 0:
-                    prog.progress((i+1)/len(lines))
-            prog.progress(1.0)
-            df = pd.DataFrame({"src": lines, "pred": preds})
+                preds.append(translate(bundle, line, decode=decode_method))
+                prog.progress((i + 1) / len(lines))
+            df = pd.DataFrame({"en": lines, "fr": preds})
             st.dataframe(df, use_container_width=True)
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("Download CSV", data=csv, file_name="translations.csv", mime="text/csv")
+            st.download_button(
+                "Download CSV",
+                data=df.to_csv(index=False).encode("utf-8"),
+                file_name="translations_en_fr.csv",
+                mime="text/csv",
+            )

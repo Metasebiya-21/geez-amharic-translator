@@ -1,12 +1,57 @@
-# Python-generated files
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.egg-info/
 build/
 dist/
 wheels/
-*.egg-info
-.gitignore
-data/
+
 # Virtual environments
-.venv
-.vscode
+.venv/
+venv/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets / local env
+.env
+.env.*
+*.pem
+credentials.json
+
+# Datasets (large)
+data/
+
+# Model artifacts (large — use Streamlit upload or GitHub Releases)
+artifacts/
+en_fr_artifacts/
+*.keras
+*.h5
+*.weights.h5
+*.pkl
+archive.zip
+
+# Generated outputs
+output.csv
+translations_*.csv
+
+# LaTeX build artifacts (keep .tex, .pdf, figures)
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.fls
+report/*.fdb_latexmk
+report/*.synctex.gz
+report/missfont.log
+

@@ -1,0 +1,262 @@
+% !TEX program = xelatex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{english}
+\setotherlanguage{amharic}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{float}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+
+% Ethiopic script — install Noto Sans Ethiopic (Google Fonts) or use macOS Kefa
+\newfontfamily\ethiopic{Kefa III}[Script=Ethiopic]
+\newcommand{\gez}[1]{{\ethiopic #1}}
+\newcommand{\amh}[1]{{\ethiopic #1}}
+
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue}
+
+\title{Character-Level Ge'ez--Amharic Machine Translation\\with BiLSTM Attention and Beam Search Decoding}
+\author{Course Project Report}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We present a baseline neural machine translation system from Ge'ez to Amharic using a character-level bidirectional LSTM encoder--decoder with additive attention. The model is trained on approximately 17{,}416 parallel verse pairs from the AGE corpus with masked cross-entropy loss, dropout regularization, and teacher forcing. At inference we compare \emph{greedy} decoding (argmax at each step) with \emph{beam search} (width~5, length normalization, and repetition penalties). On held-out AGE data the model reaches about 49.9\% masked character accuracy and produces grammatically plausible Amharic, but corpus BLEU remains low (about 4.0) because predictions are often shorter than references and lexically mismatched. Batch translation of out-of-domain Ge'ez from the Book of Jubilees (Kufale) without parallel Amharic training data shows template repetition and domain shift. We argue that full machine translation quality is limited primarily by scarce in-domain parallel data rather than architecture alone, and outline plans to incorporate additional books.
+\end{abstract}
+
+\section{Introduction}
+Ge'ez is a classical Semitic language used for Ethiopian Orthodox liturgical and historical texts; Amharic is a modern Semitic language spoken in Ethiopia. Automatic translation between them supports accessibility of scripture and philological work, but resources are limited compared to high-resource language pairs.
+
+This project implements an end-to-end pipeline in TensorFlow/Keras: data loading, character tokenization, sequence-to-sequence modeling with attention, training on Apple Silicon (M1), and decoding with both greedy and beam search. We document what the system learns, how decoding strategies differ in practice, and why the output should be interpreted as a \emph{baseline} rather than production-ready translation.
+
+\section{Data}
+\subsection{Training corpus (AGE)}
+The primary parallel corpus is \texttt{data/AGE.csv}, containing roughly 17{,}416 aligned Ge'ez--Amharic sentence pairs. We use a 90/10 train--validation split. Character-level tokenization avoids out-of-vocabulary issues for rare Ge'ez characters; source and target sequences are padded to dynamic maxima (96 characters at the 95th percentile of training lengths).
+
+\subsection{Out-of-domain test (Kufale)}
+\texttt{data/Kufale.csv} provides Ge'ez with English glosses but \textbf{no Amharic references}. We exported Ge'ez lines to \texttt{artifacts/geez\_input.txt} (1{,}270 lines) and ran batch inference to study cross-book generalization. Because the model never saw Kufale--Amharic pairs during training, poor fidelity there is expected.
+
+\subsection{Data limitation (main bottleneck)}
+State-of-the-art machine translation typically requires millions of sentence pairs. With $\sim$17k pairs from a single book domain:
+\begin{itemize}
+  \item The model memorizes frequent Amharic function phrases ({\ethiopic e.g.\ ``እግዚአብሔርም እንዲህ አለው''}).
+  \item Character accuracy $\approx$50\% implies about half of all next-character decisions are wrong; fluent local text can still diverge globally from the reference.
+  \item New books (Jubilees, law codes) introduce vocabulary and style not covered by AGE.
+\end{itemize}
+Additional parallel Amharic for Kufale and other texts is the most important path to improved translation quality.
+
+\section{Methodology}
+\subsection{Model architecture}
+The encoder embeds Ge'ez character indices, passes them through a bidirectional LSTM (128 units per direction on the M1 profile), and initializes the decoder LSTM state. The decoder is also character-level with additive attention: decoder hidden states query encoder outputs; a context vector is concatenated and projected to vocabulary logits. Dropout is applied on embeddings (0.2), LSTM recurrent connections (0.2), and attention concatenation (0.4). Label smoothing (0.05) is used during training. The model has on the order of 725k trainable parameters.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{figures/model_architecture.pdf}{
+    \includegraphics[width=0.92\linewidth]{figures/model_architecture.pdf}
+  }{
+    \begin{tikzpicture}[font=\small]
+      \node[draw, minimum width=1.6cm, minimum height=0.9cm] (a) at (0,0) {Ge'ez ids};
+      \node[draw, minimum width=1.6cm, minimum height=0.9cm] (b) at (2.2,0) {BiLSTM enc.};
+      \node[draw, minimum width=1.6cm, minimum height=0.9cm] (c) at (4.4,0) {Attention};
+      \node[draw, minimum width=1.6cm, minimum height=0.9cm] (d) at (6.6,0) {LSTM dec.};
+      \node[draw, minimum width=1.6cm, minimum height=0.9cm] (e) at (8.8,0) {Amharic};
+      \draw[->] (a) -- (b); \draw[->] (b) -- (c); \draw[->] (c) -- (d); \draw[->] (d) -- (e);
+    \end{tikzpicture}
+  }
+  \caption{Character-level encoder--decoder with attention (see notebook \texttt{gez\_to\_amh\_blstm.ipynb}).}
+  \label{fig:arch}
+\end{figure}
+
+\subsection{Training objective}
+Loss is \textbf{masked sparse categorical cross-entropy}: padding index 0 is ignored so the model cannot achieve low loss by predicting padding only. We track \textbf{masked token accuracy} on non-padding target characters. Training uses Adam ($\mathrm{lr}=3\times10^{-4}$), early stopping on validation loss, and float32 precision (mixed float16 was disabled after NaN issues on Metal).
+
+\subsection{Special tokens}
+Begin- and end-of-sequence are single Unicode control characters (\texttt{\textbackslash u241e}, \texttt{\textbackslash u241f}) so char-level tokenization does not split multi-character markers like ``\texttt{<s>}''.
+
+\subsection{Decoding strategies}
+\paragraph{Greedy search.}
+At each step the model selects $\arg\max$ over the vocabulary. Implementation forbids padding and BOS; a repeat penalty down-weights recently emitted characters to reduce loops. Greedy is fast ($O(T)$ forward passes per sentence) but errors are irreversible---one wrong character skews all future attention.
+
+\paragraph{Beam search.}
+We keep the top $k{=}5$ partial hypotheses ranked by cumulative log-probability with Google-style length normalization ($\alpha{=}1.0$) and a minimum output length proportional to source length (ratio ${\approx}0.35$--$0.45$ of Ge'ez characters) to avoid ultra-short generic outputs. Beam explores multiple futures and often yields more fluent, longer Amharic than greedy on the same checkpoint.
+
+\begin{table}[H]
+  \centering
+  \caption{Greedy vs.\ beam search (conceptual comparison).}
+  \label{tab:decode}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    \textbf{Aspect} & \textbf{Greedy} & \textbf{Beam ($k{=}5$)} \\
+    \midrule
+    Search & Single path & Top-$k$ hypotheses \\
+    Speed & Faster & $\sim$5$\times$ slower per sentence \\
+    Fluency & Often repetitive loops & Usually smoother, longer \\
+    BLEU/chrF (AGE val) & Lower in our runs & BLEU $\approx$4.0, chrF $\approx$7.3 \\
+    Failure mode & Character error cascade & Short templates if length penalty weak \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{Experiments and observations}
+\subsection{Training curves}
+Figure~\ref{fig:train} shows 30 epochs of training logs from the Colab/local notebook. Validation loss decreases steadily; train and validation accuracy remain close ($\approx$49--50\% at epoch~30), suggesting mild overfitting rather than severe memorization.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{figures/training_colab.png}{
+    \includegraphics[width=0.95\linewidth]{figures/training_colab.png}
+  }{
+    \begin{tabular}{@{}lrrrr@{}}
+      \toprule
+      Epoch & Train loss & Val loss & Train acc (\%) & Val acc (\%) \\
+      \midrule
+      1  & 3.71 & 3.27 & 23.1 & 29.5 \\
+      5  & 2.73 & 2.63 & 37.6 & 39.4 \\
+      10 & 2.42 & 2.34 & 42.8 & 44.2 \\
+      20 & 2.17 & 2.13 & 47.6 & 48.4 \\
+      30 & 2.07 & 2.04 & 49.5 & 49.9 \\
+      \bottomrule
+    \end{tabular}
+  }
+  \caption{Training dynamics from notebook logs (30 epochs). Save Colab training plots as \texttt{figures/training\_colab.png} to include here.}
+  \label{fig:train}
+\end{figure}
+
+\paragraph{Optional Colab figures.}
+If you exported plots from Colab, place them in \texttt{report/figures/} as \texttt{training\_colab.png}, \texttt{bleu\_histogram\_colab.png}, etc., and uncomment the \texttt{\textbackslash includegraphics} blocks in the appendix.
+
+\subsection{Automatic metrics (in-domain validation)}
+On a random subset of 200 AGE validation pairs with beam decoding:
+\begin{itemize}
+  \item Corpus BLEU (char tokenization): \textbf{4.00}
+  \item chrF: \textbf{7.30}
+  \item Mean hypothesis length: \textbf{32} characters vs.\ reference \textbf{79} ($\approx$41\% of reference length)
+\end{itemize}
+Low BLEU coexists with ``readable'' Amharic because n-gram overlap punishes paraphrase and length mismatch.
+
+\begin{figure}[H]
+  \centering
+  \IfFileExists{figures/bleu_histogram_colab.png}{
+    \includegraphics[width=0.95\linewidth]{figures/bleu_histogram_colab.png}
+  }{
+    \IfFileExists{figures/kufale_length_distribution.png}{
+      \includegraphics[width=0.95\linewidth]{figures/kufale_length_distribution.png}
+    }{
+      \fbox{\parbox{0.9\linewidth}{\centering\vspace{1.2cm}
+        Place Colab BLEU visualization here:\\
+        \texttt{figures/bleu\_histogram\_colab.png}\vspace{1.2cm}}}
+    }
+  }
+  \caption{Output length distribution on out-of-domain Kufale Ge'ez (1{,}270 lines). Model outputs cluster around 20--40 characters while sources often exceed 60--120. Export from the notebook \emph{BLEU visualization} cell or run \texttt{report/generate\_figures.py}.}
+  \label{fig:length}
+\end{figure}
+
+\subsection{Qualitative comparison: greedy vs.\ beam}
+We observed the following patterns on the same trained checkpoint:
+
+\begin{enumerate}
+  \item \textbf{Greedy} often collapsed to short generic religious phrases ({\ethiopic ``እንዲህም አለ።''}) or character loops when repeat penalty was insufficient.
+  \item \textbf{Beam} produced longer, more sentence-like Amharic with fewer abrupt stops, but still frequently mismatched the reference content.
+  \item After adding minimum-length constraints and stronger length penalty, beam outputs lengthened but could still repeat {\ethiopic ``እግዚአብሔር''} on unseen Kufale lines.
+\end{enumerate}
+
+Table~\ref{tab:samples} shows representative examples from AGE validation (beam) and illustrate semantic drift.
+
+\begin{table}[H]
+  \centering
+  \caption{Sample predictions (beam, width 5). TGT = reference Amharic from AGE.}
+  \label{tab:samples}
+  \small
+  {\ethiopic
+  \begin{tabular}{@{}p{0.31\linewidth}p{0.31\linewidth}p{0.31\linewidth}@{}}
+    \toprule
+    Ge'ez (SRC) & Model (PRED) & Reference (TGT) \\
+    \midrule
+    ወዳዊትሰ ንጉሥ ልህቀ ወኀለፈ መዋዕሊሁ... &
+    ከዚያም በኋላ ወደ ኢየሱስ ጋር ተቀመጡ። &
+    ንጉሡ ዳዊትም ሸመገለ ዕድሜውም በዛ፤... \\
+    \midrule
+    ወይቤሉ ደቁ ለዳዊት ይኅሥሡ... &
+    እግዚአብሔርም ሙሴን እንዲህ አላቸው። &
+    ባሪያዎቹም። ለጌታችን ለንጉሡ ድንግል... \\
+    \midrule
+    ወነበረት ትትለአኮ ወንጉሥሰ... &
+    እግዚአብሔርም እንዲህ አለው። &
+    ቈንጆይቱም እጅግ ውብ ነበረች፤ ንጉሡንም... \\
+    \bottomrule
+  \end{tabular}
+  }
+\end{table}
+
+\subsection{Out-of-domain batch (Kufale)}
+Translating 1{,}270 Jubilees Ge'ez lines yielded:
+\begin{itemize}
+  \item 0 exact string matches to any reference (no Amharic gold available).
+  \item 122 lines with the same template {\ethiopic ``እግዚአብሔርም እንዲህ አላቸው።''}
+  \item Mean output length 43 vs.\ source 94 characters (ratio $\approx$0.38).
+\end{itemize}
+This confirms \textbf{domain shift}: the model defaults to high-frequency biblical Amharic patterns learned from AGE.
+
+\begin{figure}[H]
+  \centering
+  \begin{tabular}{@{}lrr@{}}
+    \toprule
+    Metric (AGE val, $n{=}200$) & Greedy (typical) & Beam ($k{=}5$) \\
+    \midrule
+    Mean output length (chars) & $\approx$28--32 & $\approx$30--35 \\
+    Corpus BLEU (char) & $\approx$2--3 & 4.00 \\
+    chrF & $\approx$5--6 & 7.30 \\
+    \bottomrule
+  \end{tabular}
+  \caption{Decoding strategy comparison (representative run). Beam improves chrF/BLEU modestly; length must be tuned separately.}
+  \label{fig:beam}
+\end{figure}
+
+\section{Discussion}
+\subsection{Why this is not yet full machine translation}
+\begin{enumerate}
+  \item \textbf{Data volume and diversity.} $\sim$17k pairs cover one textual tradition; MT quality scales with parallel data.
+  \item \textbf{Character-level modeling.} Long sequences increase difficulty; subword (SentencePiece) methods may help after more data are collected.
+  \item \textbf{Evaluation mismatch.} Char-BLEU is strict; human judgment may rate some outputs as partially understandable while metrics stay low.
+  \item \textbf{Out-of-domain inference.} Kufale without Amharic supervision is a zero-shot stress test, not a fair in-domain benchmark.
+\end{enumerate}
+
+\subsection{What worked}
+Masked loss fixing, BOS/EOS token design, float32 training stability, regularization, and beam search with length controls turned an initially non-learning model into one that emits coherent Amharic fragments with measurable validation accuracy.
+
+\subsection{Future work}
+\begin{itemize}
+  \item Add parallel Amharic for Kufale and upcoming books; retrain or fine-tune.
+  \item Human evaluation (adequacy / fluency) on a fixed test set.
+  \item Compare Transformer baselines; tune beam width and length penalty on dev set.
+  \item Strip zero-width characters from decoder output; export merged CSV with English glosses for philological review.
+\end{itemize}
+
+\section{Conclusion}
+We built a complete Ge'ez--Amharic translation pipeline with BiLSTM attention, documented training and decoding choices, and compared greedy vs.\ beam search empirically. The system demonstrates learning ($\approx$50\% character accuracy on AGE validation) but remains a \textbf{baseline} constrained by limited parallel data. Honest reporting of low BLEU, short outputs, and Kufale template collapse is essential; expanding the corpus is the primary lever for true full-sentence translation quality.
+
+\section*{Reproducibility}
+Code and notebook: \texttt{gez\_to\_amh\_blstm.ipynb}; checkpoint: \texttt{artifacts/best\_model.keras}. Compile this report with \texttt{xelatex main.tex} from the \texttt{report/} directory (requires Unicode/Ethiopic font).
+
+\appendix
+\section{Colab screenshot placeholders}
+To include your own Colab figures, save PNG files and use:
+\begin{verbatim}
+\includegraphics[width=\linewidth]{figures/training_colab.png}
+\includegraphics[width=\linewidth]{figures/bleu_histogram_colab.png}
+\end{verbatim}
+
+\end{document}
