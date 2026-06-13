@@ -1,6 +1,18 @@
+---
+title: English → French Translator
+emoji: 🇫🇷
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: 4.44.1
+app_file: app.py
+pinned: false
+python_version: "3.10"
+---
+
 # English → French Neural Machine Translation
 
-BiLSTM encoder–decoder with attention, trained on an English–French parallel corpus. Includes a Streamlit web app for interactive translation.
+BiLSTM encoder–decoder with attention, trained on an English–French parallel corpus.
 
 **Notebooks:** `en_fr_baseline.ipynb` (EN→FR) · `gez_to_amh_blstm.ipynb` (Ge'ez→Amharic)
 
@@ -8,96 +20,79 @@ BiLSTM encoder–decoder with attention, trained on an English–French parallel
 
 ## Model artifacts
 
+Weights are **not** in this Git repo (~400 MB). Host them on **Hugging Face Hub**:
+
 ```
-en_fr_artifacts/
+your-username/en-fr-translator/
 ├── best_model.keras
 ├── src_tokenizer.pkl
 ├── tgt_tokenizer.pkl
 └── meta.json
 ```
 
+### Upload artifacts to Hugging Face
+
+```bash
+pip install huggingface_hub
+huggingface-cli login
+python scripts/upload_artifacts_to_hf.py YOUR_USERNAME/en-fr-translator
+```
 
 ---
 
-## Run locally
+## Deploy on Hugging Face Spaces (recommended)
 
-1. Clone the repository.
-2. Unzip or copy model artifacts into `en_fr_artifacts/`.
-3. Install dependencies:
+1. Create a new Space at [huggingface.co/new-space](https://huggingface.co/new-space)
+   - **SDK:** Gradio
+   - **Hardware:** CPU Basic (free) is enough for inference
+2. Push this repo (or connect GitHub) — entry point is **`app.py`**
+3. In Space **Settings → Variables and secrets**, add:
+
+   | Name | Value |
+   |------|--------|
+   | `HF_MODEL_REPO` | `YOUR_USERNAME/en-fr-translator` |
+
+4. The Space downloads weights from Hub on first run, then caches them.
+
+The YAML block at the top of this README configures the Space automatically when this file is `README.md` in the Space repo.
+
+---
+
+## Run locally (Gradio)
+
+1. Place artifacts in `en_fr_artifacts/`, **or** set `HF_MODEL_REPO=YOUR_USERNAME/en-fr-translator`
+2. Install and run:
 
    ```bash
    pip install -r requirements.txt
+   python app.py
    ```
-
-   Or with [uv](https://github.com/astral-sh/uv):
-
-   ```bash
-   uv sync
-   ```
-
-4. Start the Streamlit app:
-
-   ```bash
-   streamlit run main.py
-   ```
-
-5. Open http://localhost:8501 in your browser.
-
-The app loads `en_fr_artifacts/` by default. Use the sidebar to change the artifacts path or upload files manually.
 
 ---
 
-## Deploy with Streamlit Cloud
+## Run locally (Streamlit, optional)
 
-1. Push **code only** to GitHub (`main.py`, `inference.py`, `requirements.txt`, `packages.txt`, notebooks, report, etc.).
-2. Do **not** add model weights to the repo — they are listed in `.gitignore`.
-3. Connect the repo at [share.streamlit.io](https://share.streamlit.io) and set **Main file path** to `main.py`.
-4. **Important — Python version:** open **Advanced settings** and set **Python version to 3.10 or 3.11**. Streamlit defaults to 3.12+, and TensorFlow has no wheels for Python 3.13+, which causes `Error installing requirements` / `No matching distribution found for tensorflow`.
-5. Click **Save**, then redeploy (or delete and recreate the app if the error persists).
-
-### Troubleshooting “Error installing requirements”
-
-| Log message | Fix |
-|-------------|-----|
-| `No matching distribution found for tensorflow` | Set Python to **3.10** or **3.11** in Advanced settings, then redeploy. |
-| `tensorflow-macos` can't be installed | Push latest `main` — **`uv.lock` must not be in the repo** (it pins Mac-only packages). Cloud uses `requirements.txt` only. |
-| `geez-amharic-translator==0.1.0 depends on numpy` + download error | Transient network error — click **Reboot app** in Manage app. |
-| Install succeeds but app crashes on load | Upload model artifacts via the sidebar (weights are not in the repo). |
-
-**Do not commit `uv.lock`** for this project. Streamlit Cloud uses `uv` and will try to install Mac-only packages from an old lock file.
-
-First deploy can take **5–10 minutes** while TensorFlow installs (~400 MB).
-
-### Providing model files on Streamlit Cloud
-
-Because weights are not in the repo, use one of these approaches:
-
-| Approach | When to use |
-|----------|-------------|
-| **Sidebar upload** | Quick demos — upload `best_model.keras`, tokenizers, and `meta.json` via the app (already built in). |
-| **Hugging Face Hub** | Best for a permanent public app — host artifacts on HF and download on startup. |
-| **Google Drive / GitHub Releases** | Share a download link; load files into a cache directory when the app starts. |
-
-For a course submission, sharing a zip or Drive link alongside the repo is usually enough; reviewers can run locally or use the upload option.
+```bash
+pip install -r requirements-streamlit.txt
+streamlit run main.py
+```
 
 ---
 
 ## Project layout
 
 ```
-├── main.py              # Streamlit app
+├── app.py               # Hugging Face Space (Gradio)
+├── main.py              # Optional Streamlit UI
 ├── inference.py         # Load artifacts, beam/greedy decode
-├── requirements.txt
-├── en_fr_baseline.ipynb # Training & evaluation (EN→FR)
-├── gez_to_amh_blstm.ipynb
+├── requirements.txt     # HF Space dependencies
+├── en_fr_baseline.ipynb
 ├── en_fr_artifacts/     # Local only — not in git
-└── report/              # LaTeX report and figures
+└── report/
 ```
 
 ---
 
 ## Training
 
-See `en_fr_baseline.ipynb` for data prep, model architecture, training on Colab (T4 GPU), and evaluation (corpus BLEU ~44, chrF ~62.5).
-
-After training, export artifacts to `en_fr_artifacts/` for inference and deployment.
+See `en_fr_baseline.ipynb` for training on Colab (T4 GPU) and evaluation (corpus BLEU ~44, chrF ~62.5). Export artifacts to `en_fr_artifacts/`, then upload to Hugging Face Hub.

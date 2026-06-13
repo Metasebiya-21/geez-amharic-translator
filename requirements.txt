@@ -1,5 +1,6 @@
-# Streamlit Cloud: Python 3.10 or 3.11 in Advanced settings.
-streamlit==1.37.0
+# Hugging Face Space (Gradio) — Python 3.10 or 3.11
+gradio==4.44.1
 tensorflow==2.19.0
-pandas==2.2.2
 numpy>=1.26.4,<2.0
+pandas==2.2.2
+huggingface_hub>=0.24.0

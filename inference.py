@@ -182,6 +182,55 @@ def _load_weights_from_keras(model: Model, keras_path: Path) -> None:
         Path(tmp_path).unlink(missing_ok=True)
 
 
+ARTIFACT_FILES = ("best_model.keras", "src_tokenizer.pkl", "tgt_tokenizer.pkl", "meta.json")
+
+
+def artifacts_ready(artifacts_dir: str | Path) -> bool:
+    art = Path(artifacts_dir)
+    return art.is_dir() and all((art / name).exists() for name in ARTIFACT_FILES)
+
+
+def download_artifacts_from_hub(repo_id: str, local_dir: str | Path) -> Path:
+    """Download model files from a Hugging Face model repo."""
+    from huggingface_hub import snapshot_download
+
+    art = Path(local_dir)
+    art.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        repo_id=repo_id,
+        repo_type="model",
+        local_dir=str(art),
+        local_dir_use_symlinks=False,
+    )
+    missing = [name for name in ARTIFACT_FILES if not (art / name).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Hub repo {repo_id!r} is missing: {', '.join(missing)}. "
+            "Upload en_fr_artifacts/ with scripts/upload_artifacts_to_hf.py"
+        )
+    return art
+
+
+def resolve_artifacts_dir(
+    local_dir: str | Path | None = None,
+    hub_repo: str | None = None,
+) -> Path:
+    """Use local artifacts if present; otherwise download from Hugging Face Hub."""
+    import os
+
+    art = Path(local_dir or os.environ.get("ARTIFACTS_DIR", "en_fr_artifacts"))
+    if artifacts_ready(art):
+        return art.resolve()
+
+    repo = hub_repo or os.environ.get("HF_MODEL_REPO", "").strip()
+    if repo:
+        return download_artifacts_from_hub(repo, art)
+
+    raise FileNotFoundError(
+        f"No artifacts in {art}. Set HF_MODEL_REPO or place files in en_fr_artifacts/."
+    )
+
+
 def load_artifacts(artifacts_dir: str | Path) -> dict[str, Any]:
     art = Path(artifacts_dir)
     keras_path = art / "best_model.keras"
