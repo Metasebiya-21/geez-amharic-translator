@@ -1,6 +1,14 @@
+<<<<<<< HEAD
 # Hugging Face Space (Gradio) — Python 3.10 or 3.11
 gradio==4.44.1
 tensorflow==2.19.0
 numpy>=1.26.4,<2.0
 pandas==2.2.2
 huggingface_hub>=0.24.0
+=======
+# Streamlit Cloud: set Python to 3.10 or 3.11 in Advanced settings (TensorFlow has no 3.13+ wheels).
+streamlit==1.37.0
+tensorflow==2.19.0
+pandas==2.2.2
+numpy==1.26.4
+>>>>>>> parent of 947660f (Fix Streamlit Cloud deps: remove uv.lock, use tensorflow for Linux)

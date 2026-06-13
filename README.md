@@ -72,10 +72,40 @@ The YAML block at the top of this README configures the Space automatically when
 
 ## Run locally (Streamlit, optional)
 
+<<<<<<< HEAD
 ```bash
 pip install -r requirements-streamlit.txt
 streamlit run main.py
 ```
+=======
+1. Push **code only** to GitHub (`main.py`, `inference.py`, `requirements.txt`, `packages.txt`, notebooks, report, etc.).
+2. Do **not** add model weights to the repo — they are listed in `.gitignore`.
+3. Connect the repo at [share.streamlit.io](https://share.streamlit.io) and set **Main file path** to `main.py`.
+4. **Important — Python version:** open **Advanced settings** and set **Python version to 3.10 or 3.11**. Streamlit defaults to 3.12+, and TensorFlow has no wheels for Python 3.13+, which causes `Error installing requirements` / `No matching distribution found for tensorflow`.
+5. Click **Save**, then redeploy (or delete and recreate the app if the error persists).
+
+### Troubleshooting “Error installing requirements”
+
+| Log message | Fix |
+|-------------|-----|
+| `No matching distribution found for tensorflow` | Set Python to **3.10** or **3.11** in Advanced settings, then redeploy. |
+| `tensorflow-macos` / `tensorflow-metal` | Those are Mac-only — Streamlit Cloud uses `requirements.txt` with `tensorflow==2.19.0` (Linux). |
+| Install succeeds but app crashes on load | Upload model artifacts via the sidebar (weights are not in the repo). |
+
+First deploy can take **5–10 minutes** while TensorFlow installs (~400 MB).
+
+### Providing model files on Streamlit Cloud
+
+Because weights are not in the repo, use one of these approaches:
+
+| Approach | When to use |
+|----------|-------------|
+| **Sidebar upload** | Quick demos — upload `best_model.keras`, tokenizers, and `meta.json` via the app (already built in). |
+| **Hugging Face Hub** | Best for a permanent public app — host artifacts on HF and download on startup. |
+| **Google Drive / GitHub Releases** | Share a download link; load files into a cache directory when the app starts. |
+
+For a course submission, sharing a zip or Drive link alongside the repo is usually enough; reviewers can run locally or use the upload option.
+>>>>>>> parent of 947660f (Fix Streamlit Cloud deps: remove uv.lock, use tensorflow for Linux)
 
 ---
 
